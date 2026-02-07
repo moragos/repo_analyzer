@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C++ Code Metrics Dashboard</title>
+    <!-- D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #1e1e1e;
+            --panel-bg: #252526;
+            --border-color: #3e3e42;
+            --text-color: #cccccc;
+            --highlight-color: #37373d;
+            --accent-blue: #0e639c;
+            --accent-green: #4ec9b0;
+            --accent-red: #f44336;
+            --accent-orange: #ce9178;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* Layout */
+        #container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Left Nav */
+        #left-nav {
+            width: 50px;
+            /* Collapsed width */
+            background-color: #333333;
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 10px;
+            transition: width 0.3s;
+            overflow-x: hidden;
+            z-index: 100;
+        }
+
+        #left-nav.expanded {
+            width: 200px;
+        }
+
+        #left-nav .icon {
+            font-size: 24px;
+            margin-bottom: 20px;
+            cursor: pointer;
+            color: #858585;
+        }
+
+        #left-nav .icon:hover {
+            color: white;
+        }
+
+        #left-nav .icon-text {
+            font-size: 14px;
+            margin-left: 10px;
+            display: none;
+        }
+
+        #left-nav.expanded .icon-text {
+            display: inline;
+        }
+
+        #left-nav .nav-item {
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            padding-left: 13px;
+            cursor: pointer;
+        }
+
+        #left-nav .nav-item:hover,
+        #left-nav .nav-item.active {
+            background-color: #2a2d2e;
+            border-left: 3px solid var(--accent-blue);
+            color: white;
+        }
+
+        #left-nav .nav-item.active .icon {
+            color: white;
+        }
+
+        /* Main Window */
+        #main-window {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        header {
+            background-color: var(--panel-bg);
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+        }
+
+        #breadcrumbs {
+            font-size: 14px;
+            color: #858585;
+        }
+
+        /* Views */
+        .view-container {
+            flex: 1;
+            overflow: auto;
+            position: relative;
+            display: none;
+            /* Hidden by default */
+        }
+
+        .view-container.active {
+            display: block;
+        }
+
+        /* Metrics Table View */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            /* Fixed header */
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 8px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        th {
+            background-color: var(--panel-bg);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            font-weight: 600;
+            font-size: 13px;
+            color: #e0e0e0;
+        }
+
+        tr:hover {
+            background-color: #2a2d2e;
+        }
+
+        tr.selected {
+            background-color: var(--highlight-color);
+            border-left: 2px solid var(--accent-blue);
+        }
+
+        .caret {
+            cursor: pointer;
+            user-select: none;
+            display: inline-block;
+            width: 15px;
+            text-align: center;
+        }
+
+        .file-icon {
+            display: inline-block;
+            width: 20px;
+            text-align: center;
+            margin-right: 5px;
+        }
+
+        /* Badges */
+        .badge {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .badge-none {
+            background-color: #3c3c3c;
+            color: #aaa;
+        }
+
+        .badge-crit {
+            background-color: var(--accent-red);
+            color: white;
+        }
+
+        .badge-med {
+            background-color: var(--accent-orange);
+            color: black;
+        }
+
+        .badge-ok {
+            background-color: var(--accent-green);
+            color: black;
+        }
+
+        /* Heatmap Styles */
+        #heatmap-view {
+            overflow: hidden;
+            /* D3 handles scrolling/zooming */
+        }
+
+        #heatmap-controls {
+            padding: 10px;
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        #heatmap-container {
+            width: 100%;
+            height: calc(100% - 50px);
+            background: var(--bg-color);
+        }
+
+        .heatmap-node circle {
+            transition: all 0.3s;
+        }
+
+        .heatmap-tooltip {
+            position: absolute;
+            padding: 8px;
+            font: 12px sans-serif;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            border-radius: 4px;
+            pointer-events: none;
+            opacity: 0;
+            z-index: 1000;
+            border: 1px solid #555;
+        }
+
+        /* Right Detail Panel */
+        #right-panel {
+            width: 300px;
+            background-color: var(--panel-bg);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            transition: width 0.3s;
+        }
+
+        #right-panel.collapsed {
+            width: 0;
+            border: none;
+        }
+
+        .panel-header {
+            padding: 10px;
+            background-color: #1e1e1e;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .panel-content {
+            overflow-y: auto;
+            flex: 1;
+            padding: 10px;
+        }
+
+        .section {
+            margin-bottom: 15px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+
+        .section-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #858585;
+            margin-bottom: 8px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .section-body {
+            font-size: 13px;
+        }
+
+        .section-body.collapsed {
+            display: none;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+
+        .info-label {
+            color: #858585;
+        }
+
+        .info-val {
+            color: #e0e0e0;
+            text-align: right;
+        }
+
+        ul.detail-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        ul.detail-list li {
+            padding: 4px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-color);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #424242;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4f4f4f;
+        }
+
+        /* Modal for Lists */
+        #modal {
+            display: none;
+            position: fixed;
+            z-index: 100;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        #modal-content {
+            background-color: var(--panel-bg);
+            margin: 10% auto;
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            width: 50%;
+            max-height: 70%;
+            overflow: auto;
+            border-radius: 5px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+        }
+
+        .close-modal {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="container">
+        <!-- Left Nav -->
+        <div id="left-nav">
+            <div class="nav-item" onclick="toggleLeftNav()">
+                <span class="icon">&#9776;</span>
+                <span class="icon-text">Menu</span>
+            </div>
+            <div class="nav-item" title="Load Data">
+                <label for="file-input" style="cursor: pointer;">
+                    <span class="icon">&#128194;</span>
+                    <span class="icon-text">Load JSON</span>
+                </label>
+                <input type="file" id="file-input" accept=".json" style="display: none;" onchange="loadDataFile(this)">
+            </div>
+            <div class="nav-item active" title="Metrics" onclick="switchView('table')">
+                <span class="icon">&#128202;</span>
+                <span class="icon-text">Metrics</span>
+            </div>
+            <div class="nav-item" title="Heatmap" onclick="switchView('heatmap')">
+                <span class="icon">&#128200;</span>
+                <span class="icon-text">Heatmap</span>
+            </div>
+        </div>
+
+        <!-- Main Window -->
+        <div id="main-window">
+            <header>
+                <div id="breadcrumbs">Repository > src </div>
+                <div style="flex:1"></div>
+                <!-- Remove default Details button if not needed, or keep -->
+                <button onclick="toggleRightPanel()"
+                    style="background:none; border:none; color:white; cursor:pointer;">&#8505; Details</button>
+            </header>
+
+            <!-- Table View -->
+            <div id="table-view" class="view-container active">
+                <table id="metrics-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 300px;">Name</th>
+                            <th style="width: 80px;">LOC</th>
+                            <th style="width: 80px;">Size</th>
+                            <th style="width: 60px;">Classes</th>
+                            <th style="width: 60px;">Incls</th>
+                            <th style="width: 60px;">Incl By</th>
+                            <th style="width: 80px;">Misra (C/M)</th>
+                            <th style="width: 80px;">Coverage</th>
+                            <th style="width: 100px;">Owner</th>
+                            <th>Staleness</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <!-- Rows generated here -->
+                        <tr>
+                            <td colspan="10" style="text-align:center; padding:20px;">Use the folder icon on the left to
+                                load 'dashboard_data.json'.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Heatmap View -->
+            <div id="heatmap-view" class="view-container">
+                <div id="heatmap-controls">
+                    <label>Metric: </label>
+                    <select id="heatmap-metric-select" onchange="updateHeatmap(this.value)">
+                        <option value="loc">LOC</option>
+                        <option value="size">Size</option>
+                        <option value="staleness">Staleness</option>
+                        <option value="classes">Classes</option>
+                        <option value="includes">Includes</option>
+                        <option value="complexity">Complexity</option>
+                    </select>
+                    <span style="font-size:0.8em; color:#888;">Scroll to Zoom, Drag to Pan</span>
+                </div>
+                <div id="heatmap-container"></div>
+                <div class="heatmap-tooltip" id="heatmap-tooltip"></div>
+            </div>
+
+        </div>
+
+        <!-- Right Panel -->
+        <div id="right-panel">
+            <div class="panel-header">
+                <span id="detail-title">Select an item</span>
+                <span onclick="toggleRightPanel()" style="cursor:pointer;">&times;</span>
+            </div>
+            <div class="panel-content" id="detail-content">
+                <p style="color:#888; text-align:center; margin-top:50px;">Click a row to view details.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="context-menu"
+        style="display:none; position:fixed; background:#252526; border:1px solid #3e3e42; padding:5px; z-index:1000; cursor:pointer;">
+        <div onclick="copyPathToClipboard()" style="padding:5px 10px; color:#ccc;">Copy Path</div>
+    </div>
+
+    <script>
+        let treeData = null;
+        let selectedNode = null;
+        let contextMenuTarget = null;
+        let currentView = 'table';
+        let heatmapInitialized = false;
+
+
+        // Config
+        const LEVEL_INDENT = 20;
+
+        // Auto-load if hosted or local server
+        window.addEventListener('DOMContentLoaded', () => {
+            fetch('dashboard_data.json')
+                .then(response => {
+                    if (!response.ok) throw new Error("404");
+                    return response.json();
+                })
+                .then(data => {
+                    treeData = data;
+                    renderTable(treeData);
+                })
+                .catch(err => {
+                    console.log('Auto-load skipped: ' + err);
+                });
+        });
+
+        function switchView(viewName) {
+            currentView = viewName;
+
+            // Toggle active nav item
+            document.querySelectorAll('#left-nav .nav-item').forEach(el => el.classList.remove('active'));
+            if (viewName === 'table') document.querySelector('#left-nav .nav-item[title="Metrics"]').classList.add('active');
+            if (viewName === 'heatmap') document.querySelector('#left-nav .nav-item[title="Heatmap"]').classList.add('active');
+
+            // Toggle view containers
+            document.querySelectorAll('.view-container').forEach(el => el.classList.remove('active'));
+            document.getElementById(`${viewName}-view`).classList.add('active');
+
+            if (viewName === 'heatmap' && !heatmapInitialized && treeData) {
+                // Initialize heatmap
+                populateHeatmapMetrics(treeData);
+                renderHeatmap(treeData, document.getElementById('heatmap-metric-select').value);
+                heatmapInitialized = true;
+            }
+        }
+
+        // --- Heatmap Logic ---
+        function populateHeatmapMetrics(data) {
+            // Basic discovery, fallback to defaults if not found
+            // Not strictly needed if we hardcode sensible defaults in select
+        }
+
+        function updateHeatmap(metric) {
+            if (treeData) renderHeatmap(treeData, metric);
+        }
+
+        function renderHeatmap(data, metric) {
+            const container = document.getElementById('heatmap-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            container.innerHTML = '';
+
+            if (!data) return;
+
+            const radius = Math.min(width, height) / 2 - 50;
+
+            const tree = d3.tree()
+                .size([2 * Math.PI, radius])
+                .separation((a, b) => (a.parent == b.parent ? 1 : 2) / a.depth);
+
+            const root = d3.hierarchy(data);
+            tree(root);
+
+            // Color Scale
+            const allNodes = root.descendants();
+            const allValues = allNodes.map(d => d.data.metrics ? (d.data.metrics[metric] || 0) : 0);
+            const maxVal = Math.max(...allValues) || 10;
+            const colorScale = d3.scaleSequential(d3.interpolateTurbo).domain([0, maxVal]);
+
+            // Size Scale (Radius)
+            const sizeScale = d3.scaleSqrt().domain([0, maxVal]).range([2, 8]);
+
+            const svg = d3.select("#heatmap-container")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height)
+                .call(d3.zoom().on("zoom", (event) => {
+                    g.attr("transform", event.transform);
+                }))
+                .append("g")
+                .attr("transform", `translate(${width / 2},${height / 2})`);
+
+            const g = svg.append("g");
+
+            // Links
+            g.append("g")
+                .selectAll("path")
+                .data(root.links())
+                .join("path")
+                .attr("fill", "none")
+                .attr("stroke", "#555")
+                .attr("stroke-opacity", 0.4)
+                .attr("stroke-width", 1)
+                .attr("d", d3.linkRadial()
+                    .angle(d => d.x)
+                    .radius(d => d.y));
+
+            // Nodes
+            const nodes = g.append("g")
+                .selectAll("circle")
+                .data(allNodes)
+                .join("circle")
+                .attr("transform", d => `
+                    rotate(${d.x * 180 / Math.PI - 90})
+                    translate(${d.y},0)
+                `)
+                .attr("fill", d => {
+                    const val = d.data.metrics ? (d.data.metrics[metric] || 0) : 0;
+                    return colorScale(val);
+                })
+                .attr("r", d => {
+                    const val = d.data.metrics ? (d.data.metrics[metric] || 0) : 0;
+                    return sizeScale(val);
+                })
+                .attr("stroke", "none")
+                .style("cursor", "pointer")
+                .on("mouseover", function (event, d) {
+                    d3.select(this).attr("stroke", "white").attr("stroke-width", 2);
+                    const val = d.data.metrics ? (d.data.metrics[metric] || 0) : "N/A";
+                    d3.select("#heatmap-tooltip")
+                        .style("opacity", 1)
+                        .html(`<strong>${d.data.name}</strong><br>${metric}: ${val}`)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function () {
+                    d3.select("#heatmap-tooltip").style("opacity", 0);
+                })
+                .on("click", (event, d) => {
+                    // Update Right Panel with details
+                    selectNode(d.data, null); // null tr because we aren't in table view
+                    // Switch back to table view? Or stay? Stay is better but update panel.
+                    // If we want to highlight in table we need to switch view or sync state.
+                    // For now just update right panel.
+                    updateRightPanel(d.data);
+                });
+        }
+
+
+        function loadDataFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                try {
+                    treeData = JSON.parse(e.target.result);
+                    renderTable(treeData);
+                    if (currentView === 'heatmap') {
+                        renderHeatmap(treeData, document.getElementById('heatmap-metric-select').value);
+                    }
+                } catch (err) {
+                    alert("Failed to parse JSON: " + err);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function renderTable(root) {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = '';
+
+            function createRow(node, level, parentId) {
+                const tr = document.createElement('tr');
+                tr.dataset.id = node.path;
+                tr.dataset.level = level;
+                tr.dataset.type = node.type;
+                if (parentId) tr.dataset.parent = parentId;
+
+                // Expand/Collapse logic
+                node._expanded = node._expanded !== undefined ? node._expanded : false; // Default collapsed
+                if (level === 0) node._expanded = true; // Always expand root
+
+                tr.style.display = (parentId && !node._visible) ? 'none' : 'table-row';
+
+                // Name Column
+                const tdName = document.createElement('td');
+                tdName.style.paddingLeft = (level * LEVEL_INDENT) + 8 + 'px';
+
+                let caret = '';
+                if (node.type === 'folder' && node.children && node.children.length > 0) {
+                    caret = `<span class="caret" onclick="toggleFolder('${node.path.replace(/\\/g, '\\\\')}', event)">${node._expanded ? '&#9660;' : '&#9654;'}</span>`;
+                } else {
+                    caret = '<span class="caret"></span>';
+                }
+
+                const icon = node.type === 'folder' ? '&#128193;' : '&#128466;';
+
+                // Link logic for file name
+                let nameHtml = node.name;
+                // Use full_path if available, fallback to path
+                const linkPath = (node.full_path || node.path).replace(/\\/g, '/');
+
+                if (node.type === 'file') {
+                    // Try to make a file:// link. 
+                    nameHtml = `<a href="file:///${linkPath}" target="_blank" style="color: inherit; text-decoration: none; border-bottom: 1px dotted #888;">${node.name}</a>`;
+                }
+
+                tdName.innerHTML = `${caret} <span class="file-icon">${icon}</span> ${nameHtml}`;
+
+                // Context Menu Event
+                tdName.oncontextmenu = function (e) {
+                    e.preventDefault();
+                    showContextMenu(e, node.full_path || node.path);
+                };
+
+                tr.appendChild(tdName);
+
+                // Metrics Columns
+                const m = node.metrics;
+
+                tr.innerHTML += `<td>${formatNumber(m.loc)}</td>`;
+                tr.innerHTML += `<td>${formatBytes(m.size)}</td>`;
+                tr.innerHTML += `<td>${m.classes}</td>`; // Plain text now
+                tr.innerHTML += `<td>${m.includes}</td>`; // Plain text now
+                tr.innerHTML += `<td>${m.included_by}</td>`; // New Col
+
+                // Issues
+                const badgeC = m.misra_crit > 0 ? `<span class="badge badge-crit">${m.misra_crit}</span>` : '<span class="badge badge-none">0</span>';
+                const badgeM = m.misra_med > 0 ? `<span class="badge badge-med">${m.misra_med}</span>` : '<span class="badge badge-none">0</span>';
+                tr.innerHTML += `<td>${badgeC} / ${badgeM}</td>`;
+
+                // Coverage
+                const covClass = m.coverage > 80 ? 'badge-ok' : (m.coverage > 50 ? 'badge-med' : 'badge-crit');
+                tr.innerHTML += `<td><span class="badge ${covClass}">${m.coverage}%</span></td>`;
+
+                // Owner
+                tr.innerHTML += `<td>${truncate(m.owner || 'Unassigned', 12)}</td>`;
+
+                // Staleness
+                const staleClass = m.staleness < 20 ? 'badge-ok' : (m.staleness < 60 ? 'badge-med' : 'badge-crit');
+                const staleText = m.staleness < 20 ? 'Active' : (m.staleness < 60 ? 'Stale' : 'Old');
+                tr.innerHTML += `<td><span class="badge ${staleClass}">${staleText} (${m.staleness})</span></td>`;
+
+                // Row Click
+                tr.onclick = (e) => {
+                    // Don't modify selection if clicking the link
+                    if (e.target.tagName !== 'A') {
+                        selectNode(node, tr);
+                    }
+                };
+
+                tbody.appendChild(tr);
+
+                // Recursion
+                if (node.children) {
+                    node.children.forEach(child => {
+                        child._visible = node._expanded && (tr.style.display !== 'none');
+                        createRow(child, level + 1, node.path);
+                    });
+                }
+            }
+
+            createRow(root, 0, null);
+        }
+
+        function toggleFolder(path, event) {
+            event.stopPropagation();
+            const node = findNode(treeData, path);
+            if (node) {
+                node._expanded = !node._expanded;
+                renderTable(treeData);
+                // Re-select logic omitted for brevity, user can re-click
+            }
+        }
+
+        function findNode(root, path) {
+            if (root.path === path || (root.path === '.' && path === '.')) return root; // Handle root special case if needed
+            if (root.children) {
+                for (let child of root.children) {
+                    const found = findNode(child, path);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        function selectNode(node, trElement) {
+            selectedNode = node;
+
+            // Highlight table row if it exists
+            document.querySelectorAll('tr').forEach(tr => tr.classList.remove('selected'));
+            if (trElement) {
+                trElement.classList.add('selected');
+            } else {
+                // Try to find the tr if we didn't pass it (e.g. from heatmap)
+                const tr = document.querySelector(`tr[data-id="${node.path.replace(/\\/g, '\\\\')}"]`);
+                if (tr) tr.classList.add('selected');
+            }
+
+            updateRightPanel(node);
+            document.getElementById('breadcrumbs').innerText = `Repository > ${node.path}`;
+        }
+
+        function updateRightPanel(node) {
+            const title = document.getElementById('detail-title');
+            const content = document.getElementById('detail-content');
+            title.innerText = node.name;
+            const m = node.metrics;
+            // Use full pathname link logic here too
+            const linkPath = (node.full_path || node.path).replace(/\\/g, '/');
+            const pathLinkHtml = `<a href="file:///${linkPath}" target="_blank" style="color: inherit; text-decoration: none; border-bottom: 1px dotted #888;">${truncate(node.full_path || node.path, 30)}</a>`;
+
+            content.innerHTML = `
+            <div class="section">
+                <div class="section-title" onclick="this.nextElementSibling.classList.toggle('collapsed')">General Info <span>&#9660;</span></div>
+                <div class="section-body">
+                    <div class="info-row"><span class="info-label">Type</span> <span class="info-val">${node.type}</span></div>
+                    <div class="info-row"><span class="info-label">Path</span> <span class="info-val" title="${node.full_path || node.path}">${pathLinkHtml}</span></div>
+                    <div class="info-row"><span class="info-label">Size</span> <span class="info-val">${formatBytes(m.size)}</span></div>
+                    <div class="info-row"><span class="info-label">Owner</span> <span class="info-val">${m.owner || 'N/A'}</span></div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title" onclick="this.nextElementSibling.classList.toggle('collapsed')">Code Metrics <span>&#9660;</span></div>
+                <div class="section-body">
+                    <div class="info-row"><span class="info-label">Est. LOC</span> <span class="info-val">${formatNumber(m.loc)}</span></div>
+                    <div class="info-row"><span class="info-label">Classes</span> <span class="info-val">${m.classes}</span></div>
+                    ${renderListFull('Classes', m.classes_list)}
+                    
+                    <div class="info-row"><span class="info-label">Includes</span> <span class="info-val">${m.includes}</span></div>
+                    ${renderListFull('Includes', m.includes_list)}
+                    
+                    <div class="info-row"><span class="info-label">Included By</span> <span class="info-val">${m.included_by}</span></div>
+                    ${renderListFull('Included By', m.included_by_list)}
+                </div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title" onclick="this.nextElementSibling.classList.toggle('collapsed')">Git History <span>&#9660;</span></div>
+                <div class="section-body">
+                    <div class="info-row"><span class="info-label">Commits</span> <span class="info-val">${m.commit_count}</span></div>
+                    <div class="info-row"><span class="info-label">Last Author</span> <span class="info-val">${m.last_author}</span></div>
+                    <div class="info-row"><span class="info-label">Staleness</span> <span class="info-val">${m.staleness}/100</span></div>
+                </div>
+            </div>
+            `;
+
+            if (document.getElementById('right-panel').classList.contains('collapsed')) {
+                document.getElementById('right-panel').classList.remove('collapsed');
+            }
+        }
+
+        function renderListFull(title, list) {
+            if (!list || list.length === 0) return '';
+            let html = `<div style="margin-top:5px; margin-bottom:10px;"><span style="font-size:12px; color:#888;">${title} List:</span>`;
+            html += '<ul class="detail-list" style="padding-left:10px; font-size:12px; color:#ccc; max-height:200px; overflow-y:auto;">';
+            list.forEach(item => html += `<li>${item}</li>`);
+            html += '</ul></div>';
+            return html;
+        }
+
+        function showContextMenu(event, path) {
+            contextMenuTarget = path;
+            const menu = document.getElementById('context-menu');
+            menu.style.display = 'block';
+            menu.style.left = event.pageX + 'px';
+            menu.style.top = event.pageY + 'px';
+
+            // Close on any click
+            document.addEventListener('click', hideContextMenu, { once: true });
+        }
+
+        function hideContextMenu() {
+            document.getElementById('context-menu').style.display = 'none';
+        }
+
+        function copyPathToClipboard() {
+            if (contextMenuTarget) {
+                navigator.clipboard.writeText(contextMenuTarget).then(() => {
+                    // Feedback?
+                }).catch(err => {
+                    console.error('Failed to copy: ', err);
+                });
+            }
+        }
+
+        function toggleLeftNav() { document.getElementById('left-nav').classList.toggle('expanded'); }
+        function toggleRightPanel() { document.getElementById('right-panel').classList.toggle('collapsed'); }
+        function formatNumber(num) {
+            if (num > 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num > 1000) return (num / 1000).toFixed(1) + 'k';
+            return num;
+        }
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+        function truncate(str, n) { return (str.length > n) ? str.substr(0, n - 1) + '&hellip;' : str; }
+    </script>
+</body>
+
+</html>
